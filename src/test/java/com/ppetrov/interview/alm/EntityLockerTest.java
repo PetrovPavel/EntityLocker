@@ -1,12 +1,14 @@
 package com.ppetrov.interview.alm;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 
-import static org.junit.Assert.*;
+import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class EntityLockerTest {
 
@@ -39,11 +41,13 @@ public class EntityLockerTest {
         locked.countDown();
 
         finish.await();
-        assertFalse(entityLocker.isLocked(testID));
+        await().atMost(Duration.ofSeconds(1))
+                .pollInterval(Duration.ofMillis(1))
+                .until(() -> !entityLocker.isLocked(testID));
     }
 
     @Test
-    public void testLockingSameRow() throws InterruptedException, ExecutionException {
+    public void testLockingSameRow() throws InterruptedException {
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch locked = new CountDownLatch(1);
 
@@ -75,7 +79,9 @@ public class EntityLockerTest {
         assertFalse(secondLockAttempt.isDone());
 
         locked.countDown();
-        assertTrue(secondLockAttempt.get());
+        await().atMost(Duration.ofSeconds(1))
+                .pollInterval(Duration.ofMillis(1))
+                .until(secondLockAttempt::isDone);
     }
 
     @Test
@@ -120,8 +126,9 @@ public class EntityLockerTest {
         locked.countDown();
         finish.await();
 
-        assertFalse(entityLocker.isLocked(firstID));
-        assertFalse(entityLocker.isLocked(secondID));
+        await().atMost(Duration.ofSeconds(1))
+                .pollInterval(Duration.ofMillis(1))
+                .until(() -> !entityLocker.isLocked(firstID) && !entityLocker.isLocked(secondID));
     }
 
 }
