@@ -224,4 +224,10 @@ public class EntityLockerTest {
                 .until(() -> !entityLocker.isLocked(testID));
     }
 
+    /**
+     * Implementation of IEntityID, used only for test purposes.
+     */
+    private static class TestID implements IEntityID {
+    }
+
 }
