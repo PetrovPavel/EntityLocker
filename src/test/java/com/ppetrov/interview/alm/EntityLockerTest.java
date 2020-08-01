@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 
 import static org.awaitility.Awaitility.await;
@@ -129,6 +128,59 @@ public class EntityLockerTest {
         await().atMost(Duration.ofSeconds(1))
                 .pollInterval(Duration.ofMillis(1))
                 .until(() -> !entityLocker.isLocked(firstID) && !entityLocker.isLocked(secondID));
+    }
+
+    @Test
+    public void testReentrantLock() throws InterruptedException {
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch reentrantStart = new CountDownLatch(1);
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch reentrantLocked = new CountDownLatch(1);
+        CountDownLatch reentrantUnlocked = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+
+        EntityLocker<TestID> entityLocker = new EntityLocker<>();
+        TestID testID = new TestID();
+
+        assertFalse(entityLocker.isLocked(testID));
+
+        Thread thread = new Thread(() ->
+                entityLocker.lockAndRun(testID, () -> {
+                    start.countDown();
+                    try {
+                        locked.await();
+                        entityLocker.lockAndRun(testID, () -> {
+                            reentrantStart.countDown();
+                            try {
+                                reentrantLocked.await();
+                            } catch (InterruptedException e) {
+                                fail("Reentrant locking attempt has been interrupted.");
+                            }
+                        });
+                        reentrantUnlocked.await();
+                    } catch (InterruptedException e) {
+                        fail("Locking attempt has been interrupted.");
+                    } finally {
+                        finish.countDown();
+                    }
+                }));
+        thread.start();
+
+        start.await();
+        assertTrue(entityLocker.isLocked(testID));
+        locked.countDown();
+
+        reentrantStart.await();
+        assertTrue(entityLocker.isLocked(testID));
+        reentrantLocked.countDown();
+
+        assertTrue(entityLocker.isLocked(testID));
+        reentrantUnlocked.countDown();
+
+        finish.await();
+        await().atMost(Duration.ofSeconds(1))
+                .pollInterval(Duration.ofMillis(1))
+                .until(() -> !entityLocker.isLocked(testID));
     }
 
 }
