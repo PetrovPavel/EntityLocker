@@ -13,33 +13,27 @@ public class EntityLockerTest {
 
     @Test
     public void testIsLocked() throws InterruptedException {
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch locked = new CountDownLatch(1);
-        CountDownLatch finish = new CountDownLatch(1);
-
         EntityLocker<TestID> entityLocker = new EntityLocker<>();
         TestID testID = new TestID();
 
         assertFalse(entityLocker.isLocked(testID));
 
-        Thread thread = new Thread(() ->
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch codeRunning = new CountDownLatch(1);
+        new Thread(() ->
                 entityLocker.lockAndRun(testID, () -> {
                     start.countDown();
                     try {
-                        locked.await();
+                        codeRunning.await();
                     } catch (InterruptedException e) {
                         fail("Locking attempt has been interrupted.");
-                    } finally {
-                        finish.countDown();
                     }
-                }));
-        thread.start();
-
+                })).start();
         start.await();
-        assertTrue(entityLocker.isLocked(testID));
-        locked.countDown();
 
-        finish.await();
+        assertTrue(entityLocker.isLocked(testID));
+
+        codeRunning.countDown();
         await().atMost(Duration.ofSeconds(1))
                 .pollInterval(Duration.ofMillis(1))
                 .until(() -> !entityLocker.isLocked(testID));
@@ -47,25 +41,21 @@ public class EntityLockerTest {
 
     @Test
     public void testLockingSameRow() throws InterruptedException {
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch locked = new CountDownLatch(1);
-
         EntityLocker<TestID> entityLocker = new EntityLocker<>();
         TestID testID = new TestID();
 
-        Thread threadOne = new Thread(() ->
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch codeRunning = new CountDownLatch(1);
+        new Thread(() ->
                 entityLocker.lockAndRun(testID, () -> {
                     start.countDown();
                     try {
-                        locked.await();
+                        codeRunning.await();
                     } catch (InterruptedException e) {
                         fail("Locking attempt has been interrupted.");
                     }
-                }));
-        threadOne.start();
-
+                })).start();
         start.await();
-        assertTrue(entityLocker.isLocked(testID));
 
         FutureTask<Boolean> secondLockAttempt = new FutureTask<>(() -> {
             entityLocker.lockAndRun(testID, () -> {
@@ -74,10 +64,9 @@ public class EntityLockerTest {
         });
         new Thread(secondLockAttempt).start();
 
-        // While first thread is locking the ID, second thread should wait
         assertFalse(secondLockAttempt.isDone());
 
-        locked.countDown();
+        codeRunning.countDown();
         await().atMost(Duration.ofSeconds(1))
                 .pollInterval(Duration.ofMillis(1))
                 .until(secondLockAttempt::isDone);
@@ -85,99 +74,83 @@ public class EntityLockerTest {
 
     @Test
     public void testLockingDifferentRows() throws InterruptedException {
-        CountDownLatch start = new CountDownLatch(2);
-        CountDownLatch locked = new CountDownLatch(1);
-        CountDownLatch finish = new CountDownLatch(2);
-
         EntityLocker<TestID> entityLocker = new EntityLocker<>();
         TestID firstID = new TestID();
         TestID secondID = new TestID();
 
-        Thread threadOne = new Thread(() ->
+        CountDownLatch start = new CountDownLatch(2);
+        CountDownLatch codeRunning = new CountDownLatch(1);
+        new Thread(() ->
                 entityLocker.lockAndRun(firstID, () -> {
                     start.countDown();
                     try {
-                        locked.await();
+                        codeRunning.await();
                     } catch (InterruptedException e) {
                         fail("First locking attempt has been interrupted.");
-                    } finally {
-                        finish.countDown();
                     }
-                }));
-        Thread threadTwo = new Thread(() ->
+                })).start();
+        new Thread(() ->
                 entityLocker.lockAndRun(secondID, () -> {
                     start.countDown();
                     try {
-                        locked.await();
+                        codeRunning.await();
                     } catch (InterruptedException e) {
                         fail("Second locking attempt has been interrupted.");
-                    } finally {
-                        finish.countDown();
                     }
-                }));
-        threadOne.start();
-        threadTwo.start();
-
+                })).start();
         start.await();
+
         assertTrue(entityLocker.isLocked(firstID));
         assertTrue(entityLocker.isLocked(secondID));
 
-        locked.countDown();
-        finish.await();
+        codeRunning.countDown();
 
         await().atMost(Duration.ofSeconds(1))
                 .pollInterval(Duration.ofMillis(1))
-                .until(() -> !entityLocker.isLocked(firstID) && !entityLocker.isLocked(secondID));
+                .until(() -> !entityLocker.isLocked(firstID)
+                        && !entityLocker.isLocked(secondID));
     }
 
     @Test
     public void testReentrantLock() throws InterruptedException {
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch reentrantStart = new CountDownLatch(1);
-        CountDownLatch locked = new CountDownLatch(1);
-        CountDownLatch reentrantLocked = new CountDownLatch(1);
-        CountDownLatch reentrantUnlocked = new CountDownLatch(1);
-        CountDownLatch finish = new CountDownLatch(1);
-
         EntityLocker<TestID> entityLocker = new EntityLocker<>();
         TestID testID = new TestID();
 
-        assertFalse(entityLocker.isLocked(testID));
-
-        Thread thread = new Thread(() ->
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch reentrantStart = new CountDownLatch(1);
+        CountDownLatch codeRunning = new CountDownLatch(1);
+        CountDownLatch reentrantCodeRunning = new CountDownLatch(1);
+        CountDownLatch reentrantFinish = new CountDownLatch(1);
+        new Thread(() ->
                 entityLocker.lockAndRun(testID, () -> {
                     start.countDown();
                     try {
-                        locked.await();
+                        codeRunning.await();
                         entityLocker.lockAndRun(testID, () -> {
                             reentrantStart.countDown();
                             try {
-                                reentrantLocked.await();
+                                reentrantCodeRunning.await();
                             } catch (InterruptedException e) {
                                 fail("Reentrant locking attempt has been interrupted.");
                             }
                         });
-                        reentrantUnlocked.await();
+                        reentrantFinish.await();
                     } catch (InterruptedException e) {
                         fail("Locking attempt has been interrupted.");
-                    } finally {
-                        finish.countDown();
                     }
-                }));
-        thread.start();
-
+                })).start();
         start.await();
-        assertTrue(entityLocker.isLocked(testID));
-        locked.countDown();
 
+        assertTrue(entityLocker.isLocked(testID));
+
+        codeRunning.countDown();
         reentrantStart.await();
         assertTrue(entityLocker.isLocked(testID));
-        reentrantLocked.countDown();
 
+        reentrantCodeRunning.countDown();
         assertTrue(entityLocker.isLocked(testID));
-        reentrantUnlocked.countDown();
 
-        finish.await();
+        reentrantFinish.countDown();
         await().atMost(Duration.ofSeconds(1))
                 .pollInterval(Duration.ofMillis(1))
                 .until(() -> !entityLocker.isLocked(testID));
@@ -223,16 +196,16 @@ public class EntityLockerTest {
         finish.await();
         globalLockStart.await();
 
-        CountDownLatch afterGlobalCodeRunning = new CountDownLatch(1);
-        CountDownLatch afterGlobalLockFinish = new CountDownLatch(1);
+        CountDownLatch codeRunningAfterGlobal = new CountDownLatch(1);
+        CountDownLatch codeFinishedAfterGlobal = new CountDownLatch(1);
         new Thread(() ->
                 entityLocker.lockAndRun(testID, () -> {
                     try {
-                        afterGlobalCodeRunning.await();
+                        codeRunningAfterGlobal.await();
                     } catch (InterruptedException e1) {
                         fail("Locking attempt after global lock has been interrupted.");
                     } finally {
-                        afterGlobalLockFinish.countDown();
+                        codeFinishedAfterGlobal.countDown();
                     }
                 })).start();
 
@@ -244,8 +217,8 @@ public class EntityLockerTest {
                 .pollInterval(Duration.ofMillis(1))
                 .until(() -> entityLocker.isLocked(testID));
 
-        afterGlobalCodeRunning.countDown();
-        afterGlobalLockFinish.await();
+        codeRunningAfterGlobal.countDown();
+        codeFinishedAfterGlobal.await();
         await().atMost(Duration.ofSeconds(1))
                 .pollInterval(Duration.ofMillis(1))
                 .until(() -> !entityLocker.isLocked(testID));
