@@ -2,29 +2,46 @@ package com.ppetrov.interview.alm;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public final class EntityLocker<T extends IEntityID> {
 
     private final Map<T, ReentrantLock> locksByIDs = new ConcurrentHashMap<>();
+    private final ReadWriteLock globalLock = new ReentrantReadWriteLock();
+
+    public final void globalLock(Runnable protectedCode) {
+        globalLock.writeLock().lock();
+        try {
+            protectedCode.run();
+        } finally {
+            globalLock.writeLock().unlock();
+        }
+    }
 
     public final void lockAndRun(T id, Runnable protectedCode) {
-        ReentrantLock lock = new ReentrantLock();
-        lock.lock();
+        globalLock.readLock().lock();
         try {
-            ReentrantLock existingLock = locksByIDs.putIfAbsent(id, lock);
+            ReentrantLock lock = new ReentrantLock();
+            lock.lock();
             try {
-                if (existingLock != null) {
-                    existingLock.lock();
+                ReentrantLock existingLock = locksByIDs.putIfAbsent(id, lock);
+                try {
+                    if (existingLock != null) {
+                        existingLock.lock();
+                    }
+                    protectedCode.run();
+                } finally {
+                    if (existingLock != null) {
+                        existingLock.unlock();
+                    }
                 }
-                protectedCode.run();
             } finally {
-                if (existingLock != null) {
-                    existingLock.unlock();
-                }
+                lock.unlock();
             }
         } finally {
-            lock.unlock();
+            globalLock.readLock().unlock();
         }
     }
 

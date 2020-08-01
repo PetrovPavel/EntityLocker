@@ -183,4 +183,72 @@ public class EntityLockerTest {
                 .until(() -> !entityLocker.isLocked(testID));
     }
 
+    @Test
+    public void testGlobalLock() throws InterruptedException {
+        EntityLocker<TestID> entityLocker = new EntityLocker<>();
+        TestID testID = new TestID();
+
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch codeRunning = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        new Thread(() ->
+                entityLocker.lockAndRun(testID, () -> {
+                    start.countDown();
+                    try {
+                        codeRunning.await();
+                    } catch (InterruptedException e1) {
+                        fail("Locking attempt before global lock has been interrupted.");
+                    } finally {
+                        finish.countDown();
+                    }
+                })).start();
+        start.await();
+
+        CountDownLatch globalLockStart = new CountDownLatch(1);
+        CountDownLatch globalCodeRunning = new CountDownLatch(1);
+        CountDownLatch globalLockFinish = new CountDownLatch(1);
+        new Thread(() ->
+                entityLocker.globalLock(() -> {
+                    globalLockStart.countDown();
+                    try {
+                        globalCodeRunning.await();
+                    } catch (InterruptedException e) {
+                        fail("Global locking attempt has been interrupted.");
+                    } finally {
+                        globalLockFinish.countDown();
+                    }
+                })).start();
+
+        codeRunning.countDown();
+        finish.await();
+        globalLockStart.await();
+
+        CountDownLatch afterGlobalCodeRunning = new CountDownLatch(1);
+        CountDownLatch afterGlobalLockFinish = new CountDownLatch(1);
+        new Thread(() ->
+                entityLocker.lockAndRun(testID, () -> {
+                    try {
+                        afterGlobalCodeRunning.await();
+                    } catch (InterruptedException e1) {
+                        fail("Locking attempt after global lock has been interrupted.");
+                    } finally {
+                        afterGlobalLockFinish.countDown();
+                    }
+                })).start();
+
+        assertFalse(entityLocker.isLocked(testID));
+
+        globalCodeRunning.countDown();
+        globalLockFinish.await();
+        await().atMost(Duration.ofSeconds(1))
+                .pollInterval(Duration.ofMillis(1))
+                .until(() -> entityLocker.isLocked(testID));
+
+        afterGlobalCodeRunning.countDown();
+        afterGlobalLockFinish.await();
+        await().atMost(Duration.ofSeconds(1))
+                .pollInterval(Duration.ofMillis(1))
+                .until(() -> !entityLocker.isLocked(testID));
+    }
+
 }
